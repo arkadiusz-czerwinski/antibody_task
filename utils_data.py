@@ -27,11 +27,12 @@ id2aa_i = { True: dict(zip(list(range(len(vocab_i[True]))),  vocab_i[True])),
 class ProteinSeqDataset(Dataset):
     def __init__(self, fn, gapped=True):
         # load data
-        with open(fn, 'r') as f:
-            self.data = [l.strip('\n') for l in f]
+        # with open(fn, 'r') as f:
+        #     self.data = [l.strip('\n') for l in f]
         
         # char to id
-        self.data = [[aa2id_i[gapped][c] for c in r] for r in self.data] 
+        self.data = fn
+        self.data = [([aa2id_i[gapped][c] for c in r[0]], r[1] ) for r in self.data] 
 
     def __len__(self):
         return len(self.data)
@@ -40,4 +41,4 @@ class ProteinSeqDataset(Dataset):
         return self.data[idx]
     
 def collate_fn(batch):
-    return batch, [x for seq in batch for x in seq]
+    return batch, [x for seq in batch for x in seq[0]]

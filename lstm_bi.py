@@ -10,19 +10,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, pad_sequence
+import numpy as np
 
 class LSTM_Bi(nn.Module):
-    def __init__(self, in_dim, embedding_dim, hidden_dim, out_dim, device, fixed_len):
+    def __init__(self, in_dim, embedding_dim, hidden_dim, out_dim, device, fixed_len, max_len):
         super(LSTM_Bi, self).__init__()
         self.device = device
         self.hidden_dim = hidden_dim
-        self.word_embeddings = nn.Embedding(in_dim, embedding_dim)
+        self.in_dim = in_dim
+        self.word_embeddings = nn.Embedding(in_dim, embedding_dim, padding_idx=0)
         self.lstm_f = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
         self.lstm_b = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
-        self.fc1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc1 = nn.Linear(hidden_dim * max_len, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, out_dim)
+        self.softmax = nn.Sigmoid()
         self.fixed_len = fixed_len
+        self.max_len = max_len
         self.forward = self.forward_flen if fixed_len else self.forward_vlen
         
     def forward_flen(self, Xs, _aa2id):
@@ -31,6 +35,7 @@ class LSTM_Bi(nn.Module):
         # pad <EOS> & <SOS>
         Xs_f = [[_aa2id['<SOS>']] + seq[:-1] for seq in Xs]
         Xs_b = [[_aa2id['<EOS>']] + seq[::-1][:-1] for seq in Xs]
+        
         
         # get sequence lengths
         X_len = len(Xs_f[0])
@@ -69,28 +74,19 @@ class LSTM_Bi(nn.Module):
         out = self.fc3(out)
         
         # compute scores
-        scores = F.log_softmax(out, dim=1)
+        scores = self.softmax(out, dim=1)
         
         return scores    
 
     def forward_vlen(self, Xs, _aa2id):
-        batch_size = len(Xs)
+        # torch.save(Xs.to("cpu"), 'tensor.pt')
+        Xs_f = Xs
+        Xs_b = torch.flip(Xs, dims=[-1])
+        Xs_b = torch.tensor(Xs_b, device=self.device)
+        Xs_f = torch.tensor(Xs_f, device=self.device)
+        bs = Xs_b.shape[0]
 
-        # pad <EOS> & <SOS>
-        Xs_f = [[_aa2id['<SOS>']] + seq[:-1] for seq in Xs]
-        Xs_b = [[_aa2id['<EOS>']] + seq[::-1][:-1] for seq in Xs]
-        
-        # get sequence lengths
-        Xs_len = [len(seq) for seq in Xs_f]
-        lmax = max(Xs_len)
-        
-        # list to *.tensor
-        Xs_f = [torch.tensor(seq, device='cpu') for seq in Xs_f]
-        Xs_b = [torch.tensor(seq, device='cpu') for seq in Xs_b]
-        
-        # padding
-        Xs_f = pad_sequence(Xs_f, batch_first=True).to(self.device)
-        Xs_b = pad_sequence(Xs_b, batch_first=True).to(self.device)
+        Xs_len = [Xs_b.shape[1]] * bs
         
         # embedding
         Xs_f = self.word_embeddings(Xs_f)
@@ -101,10 +97,10 @@ class LSTM_Bi(nn.Module):
         Xs_b = pack_padded_sequence(Xs_b, Xs_len, batch_first=True, enforce_sorted=False)
         
         # feed the lstm by the packed input
-        ini_hc_state_f = (torch.zeros(1, batch_size, self.hidden_dim).to(self.device),
-                          torch.zeros(1, batch_size, self.hidden_dim).to(self.device))
-        ini_hc_state_b = (torch.zeros(1, batch_size, self.hidden_dim).to(self.device),
-                          torch.zeros(1, batch_size, self.hidden_dim).to(self.device))
+        ini_hc_state_f = (torch.zeros(1, bs, self.hidden_dim).to(self.device),
+                          torch.zeros(1, bs, self.hidden_dim).to(self.device))
+        ini_hc_state_b = (torch.zeros(1, bs, self.hidden_dim).to(self.device),
+                          torch.zeros(1, bs, self.hidden_dim).to(self.device))
 
         lstm_out_f, _ = self.lstm_f(Xs_f, ini_hc_state_f)
         lstm_out_b, _ = self.lstm_b(Xs_b, ini_hc_state_b)
@@ -112,32 +108,19 @@ class LSTM_Bi(nn.Module):
         # unpack outputs
         lstm_out_f, lstm_out_len = pad_packed_sequence(lstm_out_f, batch_first=True)
         lstm_out_b, _            = pad_packed_sequence(lstm_out_b, batch_first=True)
-        
-        lstm_out_valid_f = lstm_out_f.reshape(-1, self.hidden_dim)
-        lstm_out_valid_b = lstm_out_b.reshape(-1, self.hidden_dim)    
-        
-        idx_f = []
-        [idx_f.extend([i*lmax+j for j in range(l)]) for i, l in enumerate(Xs_len)]
-        idx_f = torch.tensor(idx_f, device=self.device)
-        
-        idx_b = []
-        [idx_b.extend([i*lmax+j for j in range(l)][::-1]) for i, l in enumerate(Xs_len)]
-        idx_b = torch.tensor(idx_b, device=self.device)     
-        
-        lstm_out_valid_f = torch.index_select(lstm_out_valid_f, 0, idx_f)
-        lstm_out_valid_b = torch.index_select(lstm_out_valid_b, 0, idx_b)
-        
-        lstm_out_valid = lstm_out_valid_f + lstm_out_valid_b       
-        
+        lstm_out_f = lstm_out_f.flatten(1,2)
+        lstm_out_b = lstm_out_b.flatten(1,2)
+        out = lstm_out_f + lstm_out_b
         # lstm hidden state to output space
-        out = F.relu(self.fc1(lstm_out_valid))
+        out = F.relu(self.fc1(out))
         out = F.relu(self.fc2(out))
         out = self.fc3(out)
         
         # compute scores
-        scores = F.log_softmax(out, dim=1)
+        # scores = F.log_softmax(out, dim=1)
+        out = self.softmax(out)
         
-        return scores  
+        return out  
     
     def set_param(self, param_dict):
         try:

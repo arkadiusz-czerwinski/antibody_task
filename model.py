@@ -14,111 +14,108 @@ import torch
 import sys
 
 class ModelLSTM:
-    def __init__(self, embedding_dim=64, hidden_dim=64, device='cpu', gapped=True, fixed_len=True):
+    def __init__(self, in_dim=40, embedding_dim=64, hidden_dim=64, device='cpu', gapped=True, fixed_len=True, out_dim=None, max_len=131):
         self.gapped = gapped
-        in_dim, out_dim = len(aa2id_i[gapped]), len(aa2id_o[gapped])
-        self.nn = LSTM_Bi(in_dim, embedding_dim, hidden_dim, out_dim, device, fixed_len)
+        out_dim if out_dim is not None else len(aa2id_o[gapped])
+        self.nn = LSTM_Bi(in_dim, embedding_dim, hidden_dim, out_dim, device, fixed_len, max_len)
         self.to(device)
         
-    def fit(self, trn_fn, vld_fn, n_epoch=10, trn_batch_size=128, vld_batch_size=512, lr=.002, save_fp=None):
+    def fit(self, dataset, n_epoch=10, trn_batch_size=128, vld_batch_size=512, lr=.002, save_fp=None):
         # loss function and optimization algorithm
-        loss_fn = torch.nn.NLLLoss()
+        loss_fn = torch.nn.BCELoss()  # binary cross entropy
         op = torch.optim.Adam(self.nn.parameters(), lr=lr)
         
         # to track minimum validation loss
         min_loss = np.inf
         
-        # dataset and dataset loader
-        trn_data = ProteinSeqDataset(trn_fn, self.gapped)
-        vld_data = ProteinSeqDataset(vld_fn, self.gapped)
-        if trn_batch_size == -1: trn_batch_size = len(trn_data)
-        if vld_batch_size == -1: vld_batch_size = len(vld_data)
-        trn_dataloader = torch.utils.data.DataLoader(trn_data, trn_batch_size, True, collate_fn=collate_fn)
-        vld_dataloader = torch.utils.data.DataLoader(vld_data, vld_batch_size, False, collate_fn=collate_fn)
-        
+        batch_size = trn_batch_size
+        train_dataloader = torch.utils.data.DataLoader(dataset['train'], batch_size=batch_size)
+        val_dataloader = torch.utils.data.DataLoader(dataset['val'], batch_size=batch_size)
         for epoch in range(n_epoch):
             # training
             self.nn.train()
             loss_avg, acc_avg, cnt = 0, 0, 0
-            with tqdm(total=len(trn_data), desc='Epoch {:03d} (TRN)'.format(epoch), ascii=True, unit='seq', bar_format='{l_bar}{r_bar}') as pbar:
-                for batch, batch_flatten in trn_dataloader:
+            with tqdm(total=len(dataset['train']), desc='Epoch {:03d} (TRN)'.format(epoch), ascii=True, unit='seq', bar_format='{l_bar}{r_bar}') as pbar:
+                for batch in train_dataloader:
+                    X = batch['input_ids']
+                    y = batch['label']
+                    y = torch.tensor(y, device=self.nn.device, dtype=torch.float)
+                    X = torch.tensor(X, device=self.nn.device)
                     # targets
-                    batch_flatten = torch.tensor(batch_flatten, device=self.nn.device)
                     
                     # forward and backward routine
                     self.nn.zero_grad()
-                    scores = self.nn(batch, aa2id_i[self.gapped])
-                    loss = loss_fn(scores, batch_flatten)
+                    scores = self.nn(X, aa2id_i[self.gapped]).squeeze()
+                    loss = loss_fn(scores, y)
                     loss.backward()
                     op.step()
                     
                     # compute statistics
-                    L = len(batch_flatten)
-                    predicted = torch.argmax(scores, 1)
+                    L = X.shape[0]
+                    predicted = torch.tensor(scores > 0.5, dtype=torch.long).flatten()
                     loss_avg = (loss_avg * cnt + loss.data.cpu().numpy() * L) / (cnt + L)
-                    corr = (predicted == batch_flatten).data.cpu().numpy()
+                    corr = (predicted == y.flatten()).data.cpu().numpy()
                     acc_avg = (acc_avg * cnt + sum(corr)) / (cnt + L)
                     cnt += L
                     
                     # update progress bar
                     pbar.set_postfix({'loss': '{:.6f}'.format(loss_avg), 'acc':  '{:.6f}'.format(acc_avg)})
-                    pbar.update(len(batch))
+                    pbar.update(X.shape[0])
             
             # validation
             self.nn.eval()
             loss_avg, acc_avg, cnt = 0, 0, 0
             with torch.set_grad_enabled(False):
-                with tqdm(total=len(vld_data), desc='          (VLD)'.format(epoch), ascii=True, unit='seq', bar_format='{l_bar}{r_bar}') as pbar:
-                    for batch, batch_flatten in vld_dataloader:
+                with tqdm(total=len(dataset['val']), desc='          (VLD)'.format(epoch), ascii=True, unit='seq', bar_format='{l_bar}{r_bar}') as pbar:
+                    for batch in val_dataloader:
+                        X = batch['input_ids']
+                        y = batch['label']
+                        y = torch.tensor(y, device=self.nn.device, dtype=torch.float)
+                        X = torch.tensor(X, device=self.nn.device)
                         # targets
-                        batch_flatten = torch.tensor(batch_flatten, device=self.nn.device)
                         
                         # forward routine
-                        scores = self.nn(batch, aa2id_i[self.gapped])
-                        loss = loss_fn(scores, batch_flatten)
+                        scores = self.nn(X, aa2id_i[self.gapped]).flatten()
+                        loss = loss_fn(scores, y)
                         
                         # compute statistics
-                        L = len(batch_flatten)
-                        predicted = torch.argmax(scores, 1)
+                        L = X.shape[0]
+                        predicted = torch.tensor(scores > 0.5, dtype=torch.long).flatten()
                         loss_avg = (loss_avg * cnt + loss.data.cpu().numpy() * L) / (cnt + L)
-                        corr = (predicted == batch_flatten).data.cpu().numpy()
+                        corr = (predicted == y.flatten()).data.cpu().numpy()
                         acc_avg = (acc_avg * cnt + sum(corr)) / (cnt + L)
                         cnt += L
                         
                         # update progress bar
                         pbar.set_postfix({'loss': '{:.6f}'.format(loss_avg), 'acc':  '{:.6f}'.format(acc_avg)})
-                        pbar.update(len(batch))
+                        pbar.update(X.shape[0])
             
             # save model
             if loss_avg < min_loss and save_fp:
                 min_loss = loss_avg
                 self.save('{}/lstm_{:.6f}.npy'.format(save_fp, loss_avg))
     
-    def eval(self, fn, batch_size=512):        
+    def eval(self, dataset, batch_size=512):        
         # dataset and dataset loader
-        data = ProteinSeqDataset(fn, self.gapped)
-        if batch_size == -1: batch_size = len(data)
-        dataloader = torch.utils.data.DataLoader(data, batch_size, False, collate_fn=collate_fn)
-        
+        test_dataset = torch.utils.data.DataLoader(dataset['test'], batch_size=batch_size)
+
         self.nn.eval()
-        scores = np.zeros(len(data), dtype=np.float32)
+        scores = []
         sys.stdout.flush()
         with torch.set_grad_enabled(False):
-            with tqdm(total=len(data), ascii=True, unit='seq', bar_format='{l_bar}{r_bar}') as pbar:
-                for n, (batch, batch_flatten) in enumerate(dataloader):
-                    actual_batch_size = len(batch)  # last iteration may contain less sequences
-                    seq_len = [len(seq) for seq in batch]
-                    seq_len_cumsum = np.cumsum(seq_len)
-                    out = self.nn(batch, aa2id_i[self.gapped]).data.cpu().numpy()
-                    out = np.split(out, seq_len_cumsum)[:-1]
-                    batch_scores = []
-                    for i in range(actual_batch_size):
-                        pos_scores = []
-                        for j in range(seq_len[i]):
-                            pos_scores.append(out[i][j, batch[i][j]])
-                        batch_scores.append(-sum(pos_scores) / seq_len[i])    
-                    scores[n*batch_size:(n+1)*batch_size] = batch_scores
-                    pbar.update(len(batch))
+            with tqdm(total=len(dataset['test']), ascii=True, unit='seq', bar_format='{l_bar}{r_bar}') as pbar:
+                for n, (batch) in enumerate(test_dataset):
+                    X = batch['input_ids']
+                    y = batch['label']
+                    y = torch.tensor(y, device=self.nn.device, dtype=torch.float)
+                    X = torch.tensor(X, device=self.nn.device)
+                    out = self.nn(X, aa2id_i[self.gapped]).squeeze()
+                    predicted = torch.tensor(out > 0.5, dtype=torch.long).flatten()
+                    preds = predicted == y
+                    for pred in preds:
+                        scores.append(pred.cpu().numpy())
+                    pbar.update(X.shape[0])
+        print(sum(scores)/len(scores))
         return scores
     
     def save(self, fn):
