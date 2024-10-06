@@ -88,6 +88,13 @@ class ModelLSTM(LightningModule):
 
         return acc
     
+    def predict_step(self, batch, batch_idx=0, dataloader_idx=0):
+        X = batch['input_ids']
+        y = batch['label'].float()
+        preds = self(X)
+
+        return preds
+    
     def on_validation_epoch_end(self):
         # Print the confusion matrix at the end of each validation epoch
         cm = self.confusion_matrix.compute()

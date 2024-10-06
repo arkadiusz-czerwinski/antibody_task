@@ -1,2 +1,4 @@
 .ipynb_checkpoints/
 __pycache__/
+*tokenizer.json
+lightning_logs
