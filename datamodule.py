@@ -5,56 +5,73 @@ from pytorch_lightning import LightningDataModule
 from datasets import Dataset, DatasetDict
 from sklearn.model_selection import train_test_split
 from tokenizers import Tokenizer
+from typing import List
+from datasets.formatting.formatting import LazyRow
+
 
 class TextDataModule(LightningDataModule):
-    def __init__(self, data_dir: str = "./data/sample/", tokenizer_path: str = "character_level_tokenizer.json", batch_size: int = 32):
+    def __init__(
+        self,
+        data_dir: str = "./data/sample/",
+        tokenizer_path: str = "character_level_tokenizer.json",
+        batch_size: int = 32,
+    ):
         super().__init__()
         self.data_dir = data_dir
         self.tokenizer_path = tokenizer_path
         self.batch_size = batch_size
         self.max_len = None
 
-    def compute_text_length(self, example):
-        example['text_length'] = len(example['text'])
+    def compute_text_length(self, example: LazyRow) -> LazyRow:
+        """Calculating number of characters in the text"""
+        example["text_length"] = len(example["text"])
         return example
 
-    def remove_newlines(self, texts):
+    def remove_newlines(self, texts: List[str]) -> List[str]:
+        """Remove newlines in the split text file"""
         return [text.replace("\n", "") for text in texts]
 
-    def add_special_tokenns(self, example):
-        example['text'] = ["[SOS]" + e+ "[EOS]" for e in example['text']]
+    def add_special_tokenns(self, example: LazyRow) -> LazyRow:
+        """Add start of the sentence and end of the sentence tokens to the sequence"""
+        example["text"] = ["[SOS]" + e + "[EOS]" for e in example["text"]]
         return example
 
-    def tokenize_example(self, example, tokenizer, max_length):
-        encodings = tokenizer.encode_batch(example['text'])
-        example['input_ids'] = [x.ids for x in encodings]
+    def tokenize_example(self, example: LazyRow, tokenizer: Tokenizer) -> LazyRow:
+        """Add tokenization of the text to each of the texts from the dataset"""
+        encodings = tokenizer.encode_batch(example["text"])
+        example["input_ids"] = [x.ids for x in encodings]
         return example
-    
-    def find_duplicates_between_sets(self, dataset_dict, set1_key, set2_key):
+
+    def find_duplicates_between_sets(
+        self, dataset_dict: DatasetDict, set1_key: str, set2_key: str
+    ) -> set:
+        """Find duplicates between 2 different dataset splits"""
         # Get the text lines from both datasets
-        set1_lines = set(dataset_dict[set1_key]['text'])
-        set2_lines = set(dataset_dict[set2_key]['text'])
-        
+        set1_lines = set(dataset_dict[set1_key]["text"])
+        set2_lines = set(dataset_dict[set2_key]["text"])
+
         # Find the common lines (duplicates) between the two sets
         duplicates = set1_lines.intersection(set2_lines)
-        
+
         if duplicates:
             print(f"Duplicates between {set1_key} and {set2_key}:")
             for line in duplicates:
                 print(line.strip())
         else:
             print(f"No duplicates found between {set1_key} and {set2_key}.")
-        
+
         return duplicates
-    
-    def build_dataset(self):
+
+    def build_dataset(self) -> DatasetDict:
+        """Build dataset for the antibody classification
+        TODO: Add config for the dynamic pathing"""
         # Load datasets for label 'b'
-        train_b = Dataset.from_text(os.path.join(self.data_dir, 'human_train_vlen.txt'))
-        val_b = Dataset.from_text(os.path.join(self.data_dir, 'human_val_vlen.txt'))
-        test_b = Dataset.from_text(os.path.join(self.data_dir, 'human_test_vlen.txt'))
+        train_b = Dataset.from_text(os.path.join(self.data_dir, "human_train_vlen.txt"))
+        val_b = Dataset.from_text(os.path.join(self.data_dir, "human_val_vlen.txt"))
+        test_b = Dataset.from_text(os.path.join(self.data_dir, "human_test_vlen.txt"))
 
         # Load dataset for label 'a'
-        with open(os.path.join(self.data_dir, 'mouse_test_vlen.txt'), 'r') as f:
+        with open(os.path.join(self.data_dir, "mouse_test_vlen.txt"), "r") as f:
             a_texts = f.readlines()
             a_texts = list(set(a_texts))
 
@@ -64,48 +81,57 @@ class TextDataModule(LightningDataModule):
         test_prop = len(test_b) / total_b
 
         train_a, temp_a = train_test_split(a_texts, test_size=(val_prop + test_prop))
-        val_a, test_a = train_test_split(temp_a, test_size=test_prop / (val_prop + test_prop))
+        val_a, test_a = train_test_split(
+            temp_a, test_size=test_prop / (val_prop + test_prop)
+        )
 
         # Create Dataset objects for label 'a'
-        train_a_dataset = Dataset.from_dict({"text": train_a, "label": [0]*len(train_a)})
-        val_a_dataset = Dataset.from_dict({"text": val_a, "label": [0]*len(val_a)})
-        test_a_dataset = Dataset.from_dict({"text": test_a, "label": [0]*len(test_a)})
+        train_a_dataset = Dataset.from_dict(
+            {"text": train_a, "label": [0] * len(train_a)}
+        )
+        val_a_dataset = Dataset.from_dict({"text": val_a, "label": [0] * len(val_a)})
+        test_a_dataset = Dataset.from_dict({"text": test_a, "label": [0] * len(test_a)})
 
         # Add label column for 'b' datasets
-        train_b = train_b.add_column('label', [1]*len(train_b))
-        val_b = val_b.add_column('label', [1]*len(val_b))
-        test_b = test_b.add_column('label', [1]*len(test_b))
+        train_b = train_b.add_column("label", [1] * len(train_b))
+        val_b = val_b.add_column("label", [1] * len(val_b))
+        test_b = test_b.add_column("label", [1] * len(test_b))
 
         # Merge datasets for label 'a' and 'b'
-        train_dataset = Dataset.from_dict({
-            'text': self.remove_newlines(train_a + train_b['text']),
-            'label': train_a_dataset['label'] + train_b['label']
-        })
+        train_dataset = Dataset.from_dict(
+            {
+                "text": self.remove_newlines(train_a + train_b["text"]),
+                "label": train_a_dataset["label"] + train_b["label"],
+            }
+        )
 
-        val_dataset = Dataset.from_dict({
-            'text': self.remove_newlines(val_a + val_b['text']),
-            'label': val_a_dataset['label'] + val_b['label']
-        })
+        val_dataset = Dataset.from_dict(
+            {
+                "text": self.remove_newlines(val_a + val_b["text"]),
+                "label": val_a_dataset["label"] + val_b["label"],
+            }
+        )
 
-        test_dataset = Dataset.from_dict({
-            'text': self.remove_newlines(test_a + test_b['text']),
-            'label': test_a_dataset['label'] + test_b['label']
-        })
+        test_dataset = Dataset.from_dict(
+            {
+                "text": self.remove_newlines(test_a + test_b["text"]),
+                "label": test_a_dataset["label"] + test_b["label"],
+            }
+        )
 
-        return DatasetDict({
-            'train': train_dataset,
-            'val': val_dataset,
-            'test': test_dataset
-        })
+        return DatasetDict(
+            {"train": train_dataset, "val": val_dataset, "test": test_dataset}
+        )
 
-    def train_tokenizer(self, dataset):
+    def train_tokenizer(self, dataset: DatasetDict) -> Tokenizer:
+        """Train tokenizer on character level"""
         # Tokenizer training code (same as before)
-        from tokenizers import Tokenizer, models, trainers, pre_tokenizers
+        from tokenizers import Tokenizer, models, pre_tokenizers
 
         # Prepare data for tokenizer training
-        train_texts = dataset['train']['text']
-        val_texts = dataset['val']['text']
-        test_texts = dataset['test']['text']
+        train_texts = dataset["train"]["text"]
+        val_texts = dataset["val"]["text"]
+        test_texts = dataset["test"]["text"]
 
         # Combine all texts
         all_texts = train_texts + val_texts + test_texts
@@ -123,35 +149,48 @@ class TextDataModule(LightningDataModule):
         return tokenizer
 
     def prepare_data(self):
+        """Build dataset for the classification if it does not exists"""
         if not os.path.isfile("./dataset.hf/dataset_dict.json"):
             dataset = self.build_dataset()
-            duplicates_train_test = self.find_duplicates_between_sets(dataset, 'train', 'test')
-            duplicates_train_val = self.find_duplicates_between_sets(dataset, 'train', 'val')
-            duplicates_val_test = self.find_duplicates_between_sets(dataset, 'val', 'test')
+            duplicates_train_test = self.find_duplicates_between_sets(
+                dataset, "train", "test"
+            )
+            duplicates_train_val = self.find_duplicates_between_sets(
+                dataset, "train", "val"
+            )
+            duplicates_val_test = self.find_duplicates_between_sets(
+                dataset, "val", "test"
+            )
 
-            dataset['val'] = dataset['val'].filter(lambda example: example['text'] not in duplicates_train_val)
-            dataset['test'] = dataset['test'].filter(lambda example: example['text'] not in duplicates_train_test)
-            dataset['test'] = dataset['test'].filter(lambda example: example['text'] not in duplicates_val_test)
-            
+            dataset["val"] = dataset["val"].filter(
+                lambda example: example["text"] not in duplicates_train_val
+            )
+            dataset["test"] = dataset["test"].filter(
+                lambda example: example["text"] not in duplicates_train_test
+            )
+            dataset["test"] = dataset["test"].filter(
+                lambda example: example["text"] not in duplicates_val_test
+            )
+
             tokenizer = self.train_tokenizer(dataset)
 
             dataset = dataset.map(self.compute_text_length)
 
-            max_train_length = max(dataset['train']['text_length'])
-            max_val_length = max(dataset['val']['text_length'])
-            max_test_length = max(dataset['test']['text_length'])
+            max_train_length = max(dataset["train"]["text_length"])
+            max_val_length = max(dataset["val"]["text_length"])
+            max_test_length = max(dataset["test"]["text_length"])
             max_text_length = max(max_train_length, max_val_length, max_test_length) + 2
 
             tokenizer.enable_padding(length=max_text_length)
 
-            tokenize_with_tokenizer = partial(self.tokenize_example, tokenizer=tokenizer, max_length=max_text_length)
+            tokenize_with_tokenizer = partial(
+                self.tokenize_example, tokenizer=tokenizer
+            )
             dataset = dataset.map(self.add_special_tokenns, batched=True)
             dataset = dataset.map(tokenize_with_tokenizer, batched=True)
 
             dataset = dataset.shuffle(seed=42)
-            dataset['metadata'] =  Dataset.from_dict({
-                "max_len": [max_text_length]
-            })
+            dataset["metadata"] = Dataset.from_dict({"max_len": [max_text_length]})
             dataset.save_to_disk("./dataset.hf")
             tokenizer.save(self.tokenizer_path)
 
@@ -160,7 +199,7 @@ class TextDataModule(LightningDataModule):
         self.prepare_data()
         self.dataset = DatasetDict.load_from_disk("./dataset.hf")
 
-        self.max_len = self.dataset['metadata']['max_len']
+        self.max_len = self.dataset["metadata"]["max_len"]
 
         self.tokenizer = Tokenizer.from_file(self.tokenizer_path)
 
@@ -168,10 +207,12 @@ class TextDataModule(LightningDataModule):
         self.dataset.set_format("torch")
 
     def train_dataloader(self):
-        return DataLoader(self.dataset['train'], batch_size=self.batch_size, shuffle=True)
+        return DataLoader(
+            self.dataset["train"], batch_size=self.batch_size, shuffle=True
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.dataset['val'], batch_size=self.batch_size)
+        return DataLoader(self.dataset["val"], batch_size=self.batch_size)
 
     def test_dataloader(self):
-        return DataLoader(self.dataset['test'], batch_size=self.batch_size)
+        return DataLoader(self.dataset["test"], batch_size=self.batch_size)

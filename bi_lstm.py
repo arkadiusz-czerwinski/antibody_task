@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
+
 class Bi_LSTM(nn.Module):
     def __init__(self, in_dim, embedding_dim, hidden_dim, out_dim, fixed_len, max_len):
         super(Bi_LSTM, self).__init__()
@@ -26,36 +27,46 @@ class Bi_LSTM(nn.Module):
         # Get batch size
         bs = Xs_b.shape[0]
         Xs_len = [Xs_b.shape[1]] * bs
-        
+
         # Embedding layer
         Xs_f = self.word_embeddings(Xs)
         Xs_b = self.word_embeddings(Xs_b)
-        
+
         # Packing the padded sequences
-        Xs_f = pack_padded_sequence(Xs_f, Xs_len, batch_first=True, enforce_sorted=False)
-        Xs_b = pack_padded_sequence(Xs_b, Xs_len, batch_first=True, enforce_sorted=False)
-        
+        Xs_f = pack_padded_sequence(
+            Xs_f, Xs_len, batch_first=True, enforce_sorted=False
+        )
+        Xs_b = pack_padded_sequence(
+            Xs_b, Xs_len, batch_first=True, enforce_sorted=False
+        )
+
         # Initial LSTM hidden states
-        ini_hc_state_f = (torch.zeros(1, bs, self.hidden_dim, device=Xs.device),  # Use input tensor's device
-                          torch.zeros(1, bs, self.hidden_dim, device=Xs.device))
-        ini_hc_state_b = (torch.zeros(1, bs, self.hidden_dim, device=Xs.device),
-                          torch.zeros(1, bs, self.hidden_dim, device=Xs.device))
+        ini_hc_state_f = (
+            torch.zeros(
+                1, bs, self.hidden_dim, device=Xs.device
+            ),  # Use input tensor's device
+            torch.zeros(1, bs, self.hidden_dim, device=Xs.device),
+        )
+        ini_hc_state_b = (
+            torch.zeros(1, bs, self.hidden_dim, device=Xs.device),
+            torch.zeros(1, bs, self.hidden_dim, device=Xs.device),
+        )
 
         # Forward pass through LSTMs
         lstm_out_f, _ = self.lstm_f(Xs_f, ini_hc_state_f)
         lstm_out_b, _ = self.lstm_b(Xs_b, ini_hc_state_b)
-        
+
         # Unpack outputs
         lstm_out_f, lstm_out_len = pad_packed_sequence(lstm_out_f, batch_first=True)
         lstm_out_b, _ = pad_packed_sequence(lstm_out_b, batch_first=True)
-        
+
         # Flatten the outputs
         lstm_out_f = lstm_out_f.flatten(1, 2)
         lstm_out_b = lstm_out_b.flatten(1, 2)
-        
+
         # Combine forward and backward LSTM outputs
         out = lstm_out_f + lstm_out_b
-        
+
         # Pass through fully connected layers
         out = F.relu(self.fc1(out))
         out = self.dropout(out)
@@ -63,26 +74,26 @@ class Bi_LSTM(nn.Module):
         out = self.dropout(out)
 
         out = self.fc3(out)
-        
+
         # Apply sigmoid for binary classification
         out = self.sigmoid(out)
-        
+
         return out
 
     def set_param(self, param_dict):
         try:
             for pn, _ in self.named_parameters():
-                exec(f'self.{pn}.data = torch.tensor(param_dict[pn])')
-            self.hidden_dim = param_dict['hidden_dim']
-            self.fixed_len = param_dict['fixed_len']
+                exec(f"self.{pn}.data = torch.tensor(param_dict[pn])")
+            self.hidden_dim = param_dict["hidden_dim"]
+            self.fixed_len = param_dict["fixed_len"]
             self.forward = self.forward_flen if self.fixed_len else self.forward_vlen
         except:
-            print('Unmatched parameter names or shapes.')
+            print("Unmatched parameter names or shapes.")
 
     def get_param(self):
         param_dict = {}
         for pn, pv in self.named_parameters():
             param_dict[pn] = pv.data.cpu().numpy()
-        param_dict['hidden_dim'] = self.hidden_dim
-        param_dict['fixed_len'] = self.fixed_len
+        param_dict["hidden_dim"] = self.hidden_dim
+        param_dict["fixed_len"] = self.fixed_len
         return param_dict

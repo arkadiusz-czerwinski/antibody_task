@@ -1,5 +1,3 @@
-import torch
-import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from datamodule import TextDataModule
 from pl_model import ModelLSTM
@@ -9,9 +7,9 @@ from pl_model import ModelLSTM
 
 # Step 1: Initialize the DataModule
 data_module = TextDataModule(
-    data_dir='data/sample/',  # Path to your dataset
-    tokenizer_path='character_level_tokenizer.json',  # Path to tokenizer
-    batch_size=512  # Customize batch size if needed
+    data_dir="data/sample/",  # Path to your dataset
+    tokenizer_path="character_level_tokenizer.json",  # Path to tokenizer
+    batch_size=512,  # Customize batch size if needed
 )
 data_module.setup()
 
@@ -24,7 +22,7 @@ model = ModelLSTM(
     gapped=True,  # If you want to use the gapped setting
     fixed_len=True,  # Use fixed-length sequences
     max_len=data_module.max_len[0],  # Pass max_len from data module
-    lr=0.002  # Learning rate
+    lr=0.002,  # Learning rate
 )
 
 # Step 3: Initialize the Trainer
