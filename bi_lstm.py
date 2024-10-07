@@ -5,7 +5,7 @@ from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 
 class Bi_LSTM(nn.Module):
-    def __init__(self, in_dim, embedding_dim, hidden_dim, out_dim, fixed_len, max_len):
+    def __init__(self, in_dim, embedding_dim, hidden_dim, out_dim, max_len):
         super(Bi_LSTM, self).__init__()
         self.hidden_dim = hidden_dim
         self.in_dim = in_dim
@@ -17,7 +17,6 @@ class Bi_LSTM(nn.Module):
         self.fc3 = nn.Linear(hidden_dim, out_dim)
         self.sigmoid = nn.Sigmoid()
         self.dropout = nn.Dropout(0.2)
-        self.fixed_len = fixed_len
         self.max_len = max_len
 
     def forward(self, Xs):

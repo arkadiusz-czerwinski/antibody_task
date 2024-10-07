@@ -13,14 +13,12 @@ class ModelLSTM(LightningModule):
         embedding_dim=64,
         hidden_dim=64,
         out_dim=1,
-        gapped=True,
-        fixed_len=True,
         max_len=131,
         lr=0.002,
     ):
         super().__init__()
+        self.save_hyperparameters()
         # Define model constants
-        self.gapped = gapped
         self.lr = lr
         self.max_len = max_len
 
@@ -33,7 +31,6 @@ class ModelLSTM(LightningModule):
             embedding_dim,
             hidden_dim,
             out_dim=out_dim,
-            fixed_len=fixed_len,
             max_len=max_len,
         )
         # Define the loss
@@ -111,8 +108,8 @@ class ModelLSTM(LightningModule):
         return acc
 
     def predict_step(self, batch: dict, batch_idx=0, dataloader_idx=0):
-        X = batch["input_ids"]
-        y = batch["label"].float()
+        X = batch["input_ids"].to(self.device)
+        y = batch["label"].float().to(self.device)
         preds = self(X)
 
         return preds
@@ -127,23 +124,3 @@ class ModelLSTM(LightningModule):
         """Set up the optimizer."""
         optimizer = torch.optim.Adam(self.nn.parameters(), lr=self.lr)
         return optimizer
-
-    def save(self, fn):
-        """Save the model parameters."""
-        param_dict = self.nn.get_param()
-        param_dict["gapped"] = self.gapped
-        np.save(fn, param_dict)
-
-    def load(self, fn):
-        """Load the model parameters."""
-        param_dict = np.load(fn, allow_pickle=True).item()
-        self.gapped = param_dict["gapped"]
-        self.nn.set_param(param_dict)
-
-    def summary(self):
-        """Print a summary of the model."""
-        for n, w in self.nn.named_parameters():
-            print("{}:\t{}".format(n, w.shape))
-        print("Fixed Length:\t{}".format(self.nn.fixed_len))
-        print("Gapped:\t{}".format(self.gapped))
-        print("Device:\t{}".format(self.device))

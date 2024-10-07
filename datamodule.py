@@ -1,4 +1,5 @@
 import os
+import json
 from functools import partial
 from torch.utils.data import DataLoader
 from pytorch_lightning import LightningDataModule
@@ -12,15 +13,16 @@ from datasets.formatting.formatting import LazyRow
 class TextDataModule(LightningDataModule):
     def __init__(
         self,
-        data_dir: str = "./data/sample/",
         tokenizer_path: str = "character_level_tokenizer.json",
+        config_path: str = "./cofigs/dataset_config.json",
         batch_size: int = 32,
     ):
         super().__init__()
-        self.data_dir = data_dir
         self.tokenizer_path = tokenizer_path
         self.batch_size = batch_size
         self.max_len = None
+        with open(config_path, 'r') as file:
+            self.config = json.load(file)
 
     def compute_text_length(self, example: LazyRow) -> LazyRow:
         """Calculating number of characters in the text"""
@@ -66,56 +68,56 @@ class TextDataModule(LightningDataModule):
         """Build dataset for the antibody classification
         TODO: Add config for the dynamic pathing"""
         # Load datasets for label 'b'
-        train_b = Dataset.from_text(os.path.join(self.data_dir, "human_train_vlen.txt"))
-        val_b = Dataset.from_text(os.path.join(self.data_dir, "human_val_vlen.txt"))
-        test_b = Dataset.from_text(os.path.join(self.data_dir, "human_test_vlen.txt"))
+        train_human = Dataset.from_text(os.path.join(self.config['data_dir'], self.config['human_train_filename']))
+        val_human = Dataset.from_text(os.path.join(self.config['data_dir'], self.config['human_val_filename']))
+        test_human = Dataset.from_text(os.path.join(self.config['data_dir'], self.config['human_test_filename']))
 
         # Load dataset for label 'a'
-        with open(os.path.join(self.data_dir, "mouse_test_vlen.txt"), "r") as f:
-            a_texts = f.readlines()
-            a_texts = list(set(a_texts))
+        with open(os.path.join(self.config['data_dir'], self.config['mouse_filename']), "r") as f:
+            mouse_texts = f.readlines()
+            mouse_texts = list(set(mouse_texts))
 
         # Split label 'a' into train/val/test
-        total_b = len(train_b) + len(val_b) + len(test_b)
-        val_prop = len(val_b) / total_b
-        test_prop = len(test_b) / total_b
+        total_human = len(train_human) + len(val_human) + len(test_human)
+        val_prop = len(val_human) / total_human
+        test_prop = len(test_human) / total_human
 
-        train_a, temp_a = train_test_split(a_texts, test_size=(val_prop + test_prop))
-        val_a, test_a = train_test_split(
-            temp_a, test_size=test_prop / (val_prop + test_prop)
+        train_mouse, temp_mouse = train_test_split(mouse_texts, test_size=(val_prop + test_prop))
+        val_mouse, test_mouse = train_test_split(
+            temp_mouse, test_size=test_prop / (val_prop + test_prop)
         )
 
         # Create Dataset objects for label 'a'
         train_a_dataset = Dataset.from_dict(
-            {"text": train_a, "label": [0] * len(train_a)}
+            {"text": train_mouse, "label": [0] * len(train_mouse)}
         )
-        val_a_dataset = Dataset.from_dict({"text": val_a, "label": [0] * len(val_a)})
-        test_a_dataset = Dataset.from_dict({"text": test_a, "label": [0] * len(test_a)})
+        val_a_dataset = Dataset.from_dict({"text": val_mouse, "label": [0] * len(val_mouse)})
+        test_a_dataset = Dataset.from_dict({"text": test_mouse, "label": [0] * len(test_mouse)})
 
         # Add label column for 'b' datasets
-        train_b = train_b.add_column("label", [1] * len(train_b))
-        val_b = val_b.add_column("label", [1] * len(val_b))
-        test_b = test_b.add_column("label", [1] * len(test_b))
+        train_human = train_human.add_column("label", [1] * len(train_human))
+        val_human = val_human.add_column("label", [1] * len(val_human))
+        test_human = test_human.add_column("label", [1] * len(test_human))
 
         # Merge datasets for label 'a' and 'b'
         train_dataset = Dataset.from_dict(
             {
-                "text": self.remove_newlines(train_a + train_b["text"]),
-                "label": train_a_dataset["label"] + train_b["label"],
+                "text": self.remove_newlines(train_mouse + train_human["text"]),
+                "label": train_a_dataset["label"] + train_human["label"],
             }
         )
 
         val_dataset = Dataset.from_dict(
             {
-                "text": self.remove_newlines(val_a + val_b["text"]),
-                "label": val_a_dataset["label"] + val_b["label"],
+                "text": self.remove_newlines(val_mouse + val_human["text"]),
+                "label": val_a_dataset["label"] + val_human["label"],
             }
         )
 
         test_dataset = Dataset.from_dict(
             {
-                "text": self.remove_newlines(test_a + test_b["text"]),
-                "label": test_a_dataset["label"] + test_b["label"],
+                "text": self.remove_newlines(test_mouse + test_human["text"]),
+                "label": test_a_dataset["label"] + test_human["label"],
             }
         )
 
