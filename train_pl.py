@@ -13,10 +13,10 @@ data_module = TextDataModule(
     batch_size=512,  # Customize batch size if needed
 )
 data_module.setup()
-
+input_dim = data_module.tokenizer.get_vocab_size()
 # Step 2: Initialize the LightningModule (the model)
 model = ModelLSTM(
-    in_dim=40,
+    in_dim=input_dim,
     embedding_dim=64,  # Embedding dimension
     hidden_dim=64,  # Hidden dimension for LSTM
     out_dim=1,  # Output dimension - Number of target
