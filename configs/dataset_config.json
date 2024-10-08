@@ -1,0 +1,7 @@
+{   
+    "data_dir": "./data/sample/",
+    "human_train_filename": "human_train_vlen.txt",
+    "human_val_filename": "human_val_vlen.txt",
+    "human_test_filename": "human_test_vlen.txt" ,
+    "mouse_filename": "mouse_test_vlen.txt"
+}
