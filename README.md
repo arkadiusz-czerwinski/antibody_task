@@ -1,16 +1,16 @@
-### Antibody clasification taks
+### Antibody clasification tasks
 
-This repository aims to create a boilerplate for a humanizatio task based on mouse and human antibodies.
+This repository aims to create a boilerplate for a humanization task based on mouse and human antibodies.
 
 #### Installation
 
-In order to install required libaries run
+In order to install the required libaries run
 ```bash
 pip instal -r requirements.txt
 ```
 
 The main training script is train_pl.py
-It can be run usin
+It can be run using
 ```bash
 python pl_model.py
 ```
